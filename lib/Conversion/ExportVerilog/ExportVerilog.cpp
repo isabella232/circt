@@ -1851,9 +1851,10 @@ SubExprInfo ExprEmitter::emitSubExpr(Value exp,
 
     // If op has multiple uses or op is a too large expression, we have to spill
     // the expression.
-    if (!op->hasOneUse() ||
-        outBuffer.size() - subExprStartIndex >
-            state.options.maximumNumberOfTokensPerExpression)
+    auto isTooLarge = outBuffer.size() - subExprStartIndex >
+                      state.options.maximumNumberOfTokensPerExpression;
+    auto isProceduralRegion = op->getParentOp()->hasTrait<ProceduralRegion>();
+    if (!op->hasOneUse() || (isTooLarge && !isProceduralRegion))
       return emitExpressionIntoTemporary();
   }
 
