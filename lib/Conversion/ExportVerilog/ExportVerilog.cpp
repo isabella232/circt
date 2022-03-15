@@ -1739,6 +1739,17 @@ static Value isZeroExtension(Value value) {
   return {};
 }
 
+/// Calculate if the op or any of its parents is a procedural region.
+static bool isProceduralRegion(Operation *op) {
+  if (op->hasTrait<ProceduralRegion>())
+    return true;
+
+  if (auto *parentOp = op->getParentOp())
+    return isProceduralRegion(parentOp);
+
+  return false;
+};
+
 /// Emit the specified value `exp` as a subexpression to the stream.  The
 /// `parenthesizeIfLooserThan` parameter indicates when parentheses should be
 /// added aroun the subexpression.  The `signReq` flag can cause emitSubExpr
@@ -1851,10 +1862,9 @@ SubExprInfo ExprEmitter::emitSubExpr(Value exp,
 
     // If op has multiple uses or op is a too large expression, we have to spill
     // the expression.
-    auto isTooLarge = outBuffer.size() - subExprStartIndex >
-                      state.options.maximumNumberOfTokensPerExpression;
-    auto isProceduralRegion = op->getParentOp()->hasTrait<ProceduralRegion>();
-    if (!op->hasOneUse() || (isTooLarge && !isProceduralRegion))
+    if (!op->hasOneUse() ||
+        outBuffer.size() - subExprStartIndex >
+            state.options.maximumNumberOfTokensPerExpression)
       return emitExpressionIntoTemporary();
   }
 
@@ -2553,7 +2563,7 @@ void StmtEmitter::emitExpression(Value exp,
   RearrangableOStream::Cursor declStartCursor, declEndCursor;
   auto hasProceduralRegion =
       llvm::any_of(tooLargeSubExpressions, [](auto expr) {
-        return expr->getParentOp()->template hasTrait<ProceduralRegion>();
+        return isProceduralRegion(expr->getParentOp());
       });
   if (hasProceduralRegion) {
     // Split the current segment to make sure the cursors we are about to create
