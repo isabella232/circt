@@ -1860,11 +1860,12 @@ SubExprInfo ExprEmitter::emitSubExpr(Value exp,
                          signRequirement);
     };
 
-    // If op has multiple uses or op is a too large expression, we have to spill
-    // the expression.
-    if (!op->hasOneUse() ||
-        outBuffer.size() - subExprStartIndex >
-            state.options.maximumNumberOfTokensPerExpression)
+    // If op has multiple uses or op is a too large expression, and it is not in
+    // a procedural region, we have to spill the expression.
+    auto isTooLarge = outBuffer.size() - subExprStartIndex >
+                      state.options.maximumNumberOfTokensPerExpression;
+    if ((!op->hasOneUse() || isTooLarge) &&
+        !isProceduralRegion(op->getParentOp()))
       return emitExpressionIntoTemporary();
   }
 
