@@ -2550,7 +2550,11 @@ void StmtEmitter::emitExpression(Value exp,
   // declarations for each variable separately from the assignments to them.
   // Otherwise we just emit inline 'wire' declarations.
   RearrangableOStream::Cursor declStartCursor, declEndCursor;
-  if (tooLargeSubExpressions[0]->getParentOp()->hasTrait<ProceduralRegion>()) {
+  auto hasProceduralRegion =
+      llvm::any_of(tooLargeSubExpressions, [](auto expr) {
+        return expr->getParentOp()->template hasTrait<ProceduralRegion>();
+      });
+  if (hasProceduralRegion) {
     // Split the current segment to make sure the cursors we are about to create
     // don't get invalidated by statement reordering.
     rearrangableStream.splitCurrentSegment();
