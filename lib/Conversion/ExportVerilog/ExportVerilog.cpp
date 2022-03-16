@@ -24,6 +24,7 @@
 #include "circt/Dialect/HW/HWAttributes.h"
 #include "circt/Dialect/HW/HWTypes.h"
 #include "circt/Dialect/HW/HWVisitors.h"
+#include "circt/Dialect/SV/SVOps.h"
 #include "circt/Dialect/SV/SVVisitors.h"
 #include "circt/Support/LLVM.h"
 #include "circt/Support/LoweringOptions.h"
@@ -2393,7 +2394,8 @@ public:
   StmtEmitter(ModuleEmitter &emitter, RearrangableOStream &outStream,
               ModuleNameManager &names)
       : EmitterBase(emitter.state, outStream), emitter(emitter),
-        rearrangableStream(outStream), names(names) {}
+        rearrangableStream(outStream), names(names),
+        topLevelDeclarationInsertPoint(outStream.getCursor()) {}
 
   void emitStatement(Operation *op);
   void emitStatementBlock(Block &body);
@@ -2518,6 +2520,8 @@ private:
   RearrangableOStream::Cursor blockDeclarationInsertPoint;
   unsigned blockDeclarationIndentLevel = INDENT_AMOUNT;
 
+  RearrangableOStream::Cursor topLevelDeclarationInsertPoint;
+
   /// This keeps track of the number of statements emitted, important for
   /// determining if we need to put out a begin/end marker in a block
   /// declaration.
@@ -2525,6 +2529,24 @@ private:
 };
 
 } // end anonymous namespace
+
+bool usedInProceduralRegion(SmallVector<Operation *> &ops) {
+  SmallVector<Operation *> worklist(ops);
+  SmallPtrSet<Operation *, 6> seen;
+  while (!worklist.empty()) {
+    auto *op = worklist.pop_back_val();
+    if (seen.contains(op))
+      continue;
+    seen.insert(op);
+    for (auto *user : op->getUsers()) {
+      if (user->hasTrait<ProceduralRegion>())
+        return true;
+      worklist.push_back(user);
+    }
+  }
+
+  return false;
+}
 
 /// Emit the specified value as an expression.  If this is an inline-emitted
 /// expression, we emit that expression, otherwise we emit a reference to the
@@ -2550,7 +2572,7 @@ void StmtEmitter::emitExpression(Value exp,
   // declarations for each variable separately from the assignments to them.
   // Otherwise we just emit inline 'wire' declarations.
   RearrangableOStream::Cursor declStartCursor, declEndCursor;
-  if (tooLargeSubExpressions[0]->getParentOp()->hasTrait<ProceduralRegion>()) {
+  if (usedInProceduralRegion(tooLargeSubExpressions)) {
     // Split the current segment to make sure the cursors we are about to create
     // don't get invalidated by statement reordering.
     rearrangableStream.splitCurrentSegment();
@@ -2594,8 +2616,8 @@ void StmtEmitter::emitExpression(Value exp,
   if (!declStartCursor.isInvalid()) {
     // Scoop up all of the stuff we just emitted, and move it to the
     // blockDeclarationInsertPoint.
-    blockDeclarationInsertPoint = rearrangableStream.moveRangeBefore(
-        blockDeclarationInsertPoint, declStartCursor, declEndCursor);
+    topLevelDeclarationInsertPoint = rearrangableStream.moveRangeBefore(
+        topLevelDeclarationInsertPoint, declStartCursor, declEndCursor);
   }
 }
 
