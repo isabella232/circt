@@ -1849,18 +1849,12 @@ SubExprInfo ExprEmitter::emitSubExpr(Value exp,
                          signRequirement);
     };
 
-    // If op has multiple uses or op is a too large expression, we want to spill
-    // the expression. If disallowLocalVariables is set, we conservatively do
-    // not spill it. This could be relaxed if we know the use of the value we
-    // are currently emitting is not in a procedural region. In order to spill a
-    // large expression used inside a procedural region, we need to be able to
-    // emit a wire in the outer scope, or detect the expression is too large
-    // earlier in the pipeline.
-    if (!state.options.disallowLocalVariables)
-      if (!op->hasOneUse() ||
-          outBuffer.size() - subExprStartIndex >
-              state.options.maximumNumberOfTokensPerExpression)
-        return emitExpressionIntoTemporary();
+    // If op has multiple uses or op is a too large expression, we have to spill
+    // the expression.
+    if (!op->hasOneUse() ||
+        outBuffer.size() - subExprStartIndex >
+            state.options.maximumNumberOfTokensPerExpression)
+      return emitExpressionIntoTemporary();
   }
 
   // Remember that we emitted this.
