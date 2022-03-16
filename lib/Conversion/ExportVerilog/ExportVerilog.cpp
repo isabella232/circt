@@ -2530,7 +2530,15 @@ private:
 
 } // end anonymous namespace
 
-bool usedInProceduralRegion(SmallVector<Operation *> &ops) {
+bool isInProceduralRegion(SmallVector<Operation *> &ops) {
+  // First check if any of the ops is in a procedural region.
+  for (auto *op : ops)
+    if (op->getParentOp()->hasTrait<ProceduralRegion>())
+      return true;
+
+  // Also check if any uses of the ops are in a procedural region. This is
+  // necessary because non side-effecting ops are hoisted in PrepareForEmission,
+  // but may be in a procedural region, and cannot be spilled to wires.
   SmallVector<Operation *> worklist(ops);
   SmallPtrSet<Operation *, 6> seen;
   while (!worklist.empty()) {
@@ -2572,7 +2580,8 @@ void StmtEmitter::emitExpression(Value exp,
   // declarations for each variable separately from the assignments to them.
   // Otherwise we just emit inline 'wire' declarations.
   RearrangableOStream::Cursor declStartCursor, declEndCursor;
-  if (usedInProceduralRegion(tooLargeSubExpressions)) {
+  SmallVector<bool> exprEmittedCompletely(tooLargeSubExpressions.size());
+  if (isInProceduralRegion(tooLargeSubExpressions)) {
     // Split the current segment to make sure the cursors we are about to create
     // don't get invalidated by statement reordering.
     rearrangableStream.splitCurrentSegment();
@@ -3619,6 +3628,7 @@ isExpressionEmittedInlineIntoProceduralDeclaration(Operation *op,
 bool StmtEmitter::emitDeclarationForTemporary(Operation *op) {
   StringRef declWord = getVerilogDeclWord(op, state.options);
 
+  // TODO(MIKE): fix indent here to consider top level.
   os.indent(blockDeclarationIndentLevel) << declWord;
   if (!declWord.empty())
     os << ' ';
