@@ -2594,7 +2594,8 @@ void StmtEmitter::emitExpression(Value exp,
     declStartCursor = rearrangableStream.getCursor();
 
     // Emit the declarations into the stream.
-    for (auto *expr : tooLargeSubExpressions) {
+    for (size_t i = 0, e = tooLargeSubExpressions.size(); i < e; ++i) {
+      auto *expr = tooLargeSubExpressions[i];
       // TODO: This results in a lot of things like this:
       //   automatic logic _tmp;
       //   automatic logic _tmp_0;
@@ -2603,7 +2604,9 @@ void StmtEmitter::emitExpression(Value exp,
       // we recurse up to finishing off the procedural statement.  That would
       // also eliminate the need for blockDeclarationInsertPoint to be so
       // 'global'.
-      if (!emitDeclarationForTemporary(expr))
+      bool emittedCompletely = emitDeclarationForTemporary(expr);
+      exprEmittedCompletely[i] = emittedCompletely;
+      if (!emittedCompletely)
         os << ";\n";
       ++numStatementsEmitted;
     }
@@ -2616,7 +2619,13 @@ void StmtEmitter::emitExpression(Value exp,
 
   // Emit each stmt expression in turn.
   auto stmtStartCursor = rearrangableStream.getCursor();
-  for (auto *expr : tooLargeSubExpressions) {
+  for (size_t i = 0, e = tooLargeSubExpressions.size(); i < e; ++i) {
+    // If the expression was completely emitted by emitDeclarationForTemporary,
+    // skip it.
+    if (exprEmittedCompletely[i])
+      continue;
+
+    auto *expr = tooLargeSubExpressions[i];
     ++numStatementsEmitted;
     emitStatementExpression(expr);
   }
@@ -2628,7 +2637,9 @@ void StmtEmitter::emitExpression(Value exp,
       prevStmtBeginning, stmtStartCursor, rearrangableStream.getCursor());
   if (!declStartCursor.isInvalid()) {
     // Scoop up all of the stuff we just emitted, and move it to the
-    // blockDeclarationInsertPoint.
+    // appropriate insertion point. If disallowLocalVariables is set, that has
+    // to be the top-level module body. Otherwise, move it to the current block
+    // with blockDeclarationInsertPoint.
     topLevelDeclarationInsertPoint = rearrangableStream.moveRangeBefore(
         topLevelDeclarationInsertPoint, declStartCursor, declEndCursor);
   }
