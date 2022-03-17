@@ -2403,8 +2403,10 @@ public:
   /// Emit the declaration for the temporary operation. If the operation is not
   /// a constant, emit no initializer and no semicolon, e.g. `wire foo`, and
   /// return false. If the operation *is* a constant, also emit the initializer
-  /// and semicolon, e.g. `localparam K = 1'h0;`, and return true.
-  bool emitDeclarationForTemporary(Operation *op);
+  /// and semicolon, e.g. `localparam K = 1'h0;`, and return true. Use the given
+  /// indent level to emit temporaries indented appropriately whether they are
+  /// at the top-level module scope, or nested inside a sub-statement.
+  bool emitDeclarationForTemporary(Operation *op, unsigned indentLevel);
 
 private:
   void collectNamesEmitDecls(Block &block);
@@ -2596,6 +2598,11 @@ void StmtEmitter::emitExpression(Value exp,
     // Emit the declarations into the stream.
     for (size_t i = 0, e = tooLargeSubExpressions.size(); i < e; ++i) {
       auto *expr = tooLargeSubExpressions[i];
+      // Emit the declaration for the temporary. If disallowLocalVariables is
+      // set, we will emit it to the top-level module body, so use the top-level
+      // indent level. Otherwise, use the current block indent level. We also
+      // track if the temporary was emitted completely, so we don't duplicated
+      // it in emitStatementExpression below.
       // TODO: This results in a lot of things like this:
       //   automatic logic _tmp;
       //   automatic logic _tmp_0;
@@ -2604,7 +2611,10 @@ void StmtEmitter::emitExpression(Value exp,
       // we recurse up to finishing off the procedural statement.  That would
       // also eliminate the need for blockDeclarationInsertPoint to be so
       // 'global'.
-      bool emittedCompletely = emitDeclarationForTemporary(expr);
+      unsigned indentLevel = state.options.disallowLocalVariables
+                                 ? topLevelDeclarationIndentLevel
+                                 : blockDeclarationIndentLevel;
+      bool emittedCompletely = emitDeclarationForTemporary(expr, indentLevel);
       exprEmittedCompletely[i] = emittedCompletely;
       if (!emittedCompletely)
         os << ";\n";
@@ -2672,7 +2682,7 @@ void StmtEmitter::emitStatementExpression(Operation *op) {
     }
     indent() << names.getName(op->getResult(0)) << " = ";
   } else {
-    if (emitDeclarationForTemporary(op))
+    if (emitDeclarationForTemporary(op, blockDeclarationIndentLevel))
       return;
     os << " = ";
   }
@@ -3643,12 +3653,14 @@ isExpressionEmittedInlineIntoProceduralDeclaration(Operation *op,
 /// Emit the declaration for the temporary operation. If the operation is not
 /// a constant, emit no initializer and no semicolon, e.g. `wire foo`, and
 /// return false. If the operation *is* a constant, also emit the initializer
-/// and semicolon, e.g. `localparam K = 1'h0`, and return true.
-bool StmtEmitter::emitDeclarationForTemporary(Operation *op) {
+/// and semicolon, e.g. `localparam K = 1'h0`, and return true. Use the given
+/// indent level to emit temporaries indented appropriately whether they are at
+/// the top-level module scope, or nested inside a sub-statement.
+bool StmtEmitter::emitDeclarationForTemporary(Operation *op,
+                                              unsigned indentLevel) {
   StringRef declWord = getVerilogDeclWord(op, state.options);
 
-  // TODO(MIKE): fix indent here to consider top level.
-  os.indent(blockDeclarationIndentLevel) << declWord;
+  os.indent(indentLevel) << declWord;
   if (!declWord.empty())
     os << ' ';
   if (emitter.printPackedType(stripUnpackedTypes(op->getResult(0).getType()),
