@@ -2640,8 +2640,12 @@ void StmtEmitter::emitExpression(Value exp,
     // appropriate insertion point. If disallowLocalVariables is set, that has
     // to be the top-level module body. Otherwise, move it to the current block
     // with blockDeclarationInsertPoint.
-    topLevelDeclarationInsertPoint = rearrangableStream.moveRangeBefore(
-        topLevelDeclarationInsertPoint, declStartCursor, declEndCursor);
+    if (state.options.disallowLocalVariables)
+      topLevelDeclarationInsertPoint = rearrangableStream.moveRangeBefore(
+          topLevelDeclarationInsertPoint, declStartCursor, declEndCursor);
+    else
+      blockDeclarationInsertPoint = rearrangableStream.moveRangeBefore(
+          blockDeclarationInsertPoint, declStartCursor, declEndCursor);
   }
 }
 
