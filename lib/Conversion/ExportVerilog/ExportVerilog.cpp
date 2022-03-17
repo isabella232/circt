@@ -2394,8 +2394,7 @@ public:
   StmtEmitter(ModuleEmitter &emitter, RearrangableOStream &outStream,
               ModuleNameManager &names)
       : EmitterBase(emitter.state, outStream), emitter(emitter),
-        rearrangableStream(outStream), names(names),
-        topLevelDeclarationInsertPoint(outStream.getCursor()) {}
+        rearrangableStream(outStream), names(names) {}
 
   void emitStatement(Operation *op);
   void emitStatementBlock(Block &body);
@@ -2520,7 +2519,12 @@ private:
   RearrangableOStream::Cursor blockDeclarationInsertPoint;
   unsigned blockDeclarationIndentLevel = INDENT_AMOUNT;
 
+  /// This is the index of the end of the declaration region of the top-level
+  /// scope within the current module. It is set once in the top-level call to
+  /// collectNamesEmitDecls, and should only be updated as later declarations
+  /// are emitted in the top-level scope of the module.
   RearrangableOStream::Cursor topLevelDeclarationInsertPoint;
+  unsigned topLevelDeclarationIndentLevel = INDENT_AMOUNT;
 
   /// This keeps track of the number of statements emitted, important for
   /// determining if we need to put out a begin/end marker in a block
@@ -3744,6 +3748,15 @@ void StmtEmitter::emitStatementBlock(Block &body) {
   // are all emitted at the top of their enclosing blocks.
   if (!isa<IfDefProceduralOp>(body.getParentOp()))
     collectNamesEmitDecls(body);
+
+  // Some spills temporaries must be hoisted to the top-level scope of the
+  // module, so keep a cursor at that insertion point as well. The cursor starts
+  // in an invalid state, so only save it in that case, and not in recursive
+  // calls to sub-statements.
+  if (topLevelDeclarationInsertPoint.isInvalid()) {
+    topLevelDeclarationInsertPoint = rearrangableStream.getCursor();
+    topLevelDeclarationIndentLevel = state.currentIndent;
+  }
 
   // Emit the body.
   for (auto &op : body) {
