@@ -46,6 +46,15 @@ bool ExportVerilog::isSimpleReadOrPort(Value v) {
   return isa<WireOp, RegOp>(readSrc);
 }
 
+// Check if the value is deemed worth spilling into a wire.
+static bool shouldSpillWire(Operation &op, const LoweringOptions &options) {
+  return op.getNumOperands() > options.maximumNumberOfTermsPerExpression &&
+         op.getNumResults() == 1 &&
+         std::distance(op.getResult(0).user_begin(),
+                       op.getResult(0).user_end()) == 1 &&
+         !isa<AssignOp>(*op.getResult(0).getUsers().begin());
+}
+
 // Given an invisible instance, make sure all inputs are driven from
 // wires or ports.
 static void lowerBoundInstance(InstanceOp op) {
@@ -375,9 +384,19 @@ void ExportVerilog::prepareHWModule(Block &block,
 
   // True if these operations are in a procedural region.
   bool isProceduralRegion = block.getParentOp()->hasTrait<ProceduralRegion>();
+
+  // Maintain a set of expressions that have been deemed worth spilling into
+  // their own wire.
+  llvm::SmallPtrSet<Operation *, 8> opsToSpill;
+
   for (Block::iterator opIterator = block.begin(), e = block.end();
        opIterator != e;) {
     auto &op = *opIterator++;
+
+    // Before any splitting, hoisting, etc., decide if this expression should go
+    // into its own wire. This should be updated if ops are replaced.
+    if (shouldSpillWire(op, options))
+      opsToSpill.insert(&op);
 
     // Lower variadic fully-associative operations with more than two operands
     // into balanced operand trees so we can split long lines across multiple
@@ -393,6 +412,12 @@ void ExportVerilog::prepareHWModule(Block &block,
       // Lower this operation to a balanced binary tree of the same operation.
       SmallVector<Operation *> newOps;
       auto result = lowerFullyAssociativeOp(op, op.getOperands(), newOps);
+      // If this operation is in opsToSpill, update opsToSpill with the new
+      // expression root.
+      if (opsToSpill.count(&op)) {
+        opsToSpill.erase(&op);
+        opsToSpill.insert(result.getDefiningOp());
+      }
       op.getResult(0).replaceAllUsesWith(result);
       op.erase();
 
@@ -481,9 +506,15 @@ void ExportVerilog::prepareHWModule(Block &block,
       // conditions, $fwrite statements, and instance inputs.  We could be
       // smarter in ExportVerilog itself, but we'd have to teach it to put
       // spilled expressions (due to line length, multiple-uses, and
-      // non-inlinable expressions) in the outer scope.
-      if (hoistNonSideEffectExpr(&op))
+      // non-inlinable expressions) in the outer scope. See
+      // https://github.com/llvm/circt/pull/2773 for an example of this.
+      if (hoistNonSideEffectExpr(&op)) {
+        // If this operation is deemed worth spilling into a wire, we need to do
+        // it here, when hoisting out of a place we can't have local variables.
+        if (opsToSpill.count(&op))
+          lowerUsersToTemporaryWire(op);
         continue;
+      }
     }
 
     // Duplicate "always inline" expression for each of their users and move
