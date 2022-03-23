@@ -1841,31 +1841,6 @@ SubExprInfo ExprEmitter::emitSubExpr(Value exp,
     break;
   }
 
-  if (outBuffer.size() - subExprStartIndex > threshold &&
-      parenthesizeIfLooserThan != ForceEmitMultiUse &&
-      !isExpressionAlwaysInline(op)) {
-    // Inform the module emitter that this expression needs a temporary
-    // wire/logic declaration and set it up so it will be referenced instead of
-    // emitted inline.
-    auto emitExpressionIntoTemporary = [&]() {
-      retroactivelyEmitExpressionIntoTemporary(op);
-
-      // Lop this off the buffer we emitted.
-      outBuffer.resize(subExprStartIndex);
-
-      // Try again, now it will get emitted as a out-of-line leaf.
-      return emitSubExpr(exp, parenthesizeIfLooserThan, outOfLineBehavior,
-                         signRequirement);
-    };
-
-    // If op has multiple uses or op is a too large expression, we have to spill
-    // the expression.
-    if (!op->hasOneUse() ||
-        outBuffer.size() - subExprStartIndex >
-            state.options.maximumNumberOfTokensPerExpression)
-      return emitExpressionIntoTemporary();
-  }
-
   // Remember that we emitted this.
   emittedExprs.insert(exp.getDefiningOp());
   return expInfo;
