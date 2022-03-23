@@ -228,7 +228,8 @@ static Value lowerFullyAssociativeOp(Operation &op, OperandRange operands,
 
 /// When we find that an operation is used before it is defined in a graph
 /// region, we emit an explicit wire to resolve the issue.
-static void lowerUsersToTemporaryWire(Operation &op, Block *block) {
+static void lowerUsersToTemporaryWire(Operation &op) {
+  Block *block = op.getBlock();
   auto builder = ImplicitLocOpBuilder::atBlockBegin(op.getLoc(), block);
 
   for (auto result : op.getResults()) {
@@ -481,8 +482,7 @@ void ExportVerilog::prepareHWModule(Block &block,
         hoistNonSideEffectExpr(&op);
         continue;
       }
-      lowerUsersToTemporaryWire(
-          op, op.getParentOfType<HWModuleOp>().getBodyBlock());
+      lowerUsersToTemporaryWire(op);
     }
 
     // Lower variadic fully-associative operations with more than two operands
@@ -566,7 +566,7 @@ void ExportVerilog::prepareHWModule(Block &block,
       }
 
       // Otherwise, we need to lower this to a wire to resolve this.
-      lowerUsersToTemporaryWire(op, op.getBlock());
+      lowerUsersToTemporaryWire(op);
     }
   }
 }
