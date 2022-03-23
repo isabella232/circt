@@ -50,8 +50,12 @@ bool ExportVerilog::isSimpleReadOrPort(Value v) {
 // the number of terms in any single expression, but it could walk up the whole
 // expression tree.
 static bool shouldSpillWire(Operation &op, const LoweringOptions &options) {
+  auto isSpilled = [](Value v) {
+    return llvm::any_of(v.getUsers(),
+                        [](auto *op) { return isa<AssignOp>(op); });
+  };
   return op.getNumOperands() > options.maximumNumberOfTermsPerExpression &&
-         op.getNumResults() == 1;
+         op.getNumResults() == 1 && !isSpilled(op.getResult(0));
 }
 
 // Given an invisible instance, make sure all inputs are driven from
@@ -478,10 +482,22 @@ void ExportVerilog::prepareHWModule(Block &block,
       // we can't have wires there. This could potentially use an "automatic
       // logic" type construct, if it exists in the SV dialect, and not hoist
       // all the way out.
-      if (isProceduralRegion)
-        hoistNonSideEffectExpr(&op);
+      if (isProceduralRegion) {
+        // If we're in a procedural region, we have to be able to hoist this to
+        // create a wire.
+        if (hoistNonSideEffectExpr(&op)) {
+          // Create the actual wire, and update users.
+          lowerUsersToTemporaryWire(op);
 
-      // Create the actual wire, and update users.
+          // Move along within the block. The rewrites below will happen on this
+          // expression when we recurse back out.
+          ++opIterator;
+        }
+
+        continue;
+      }
+
+      // Otherwise, in a graph region, create the actual wire, and update users.
       lowerUsersToTemporaryWire(op);
     }
 
