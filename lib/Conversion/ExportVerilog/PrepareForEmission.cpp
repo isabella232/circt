@@ -228,8 +228,7 @@ static Value lowerFullyAssociativeOp(Operation &op, OperandRange operands,
 
 /// When we find that an operation is used before it is defined in a graph
 /// region, we emit an explicit wire to resolve the issue.
-static void lowerUsersToTemporaryWire(Operation &op) {
-  Block *block = op.getBlock();
+static void lowerUsersToTemporaryWire(Operation &op, Block *block) {
   auto builder = ImplicitLocOpBuilder::atBlockBegin(op.getLoc(), block);
 
   for (auto result : op.getResults()) {
@@ -393,39 +392,6 @@ void ExportVerilog::prepareHWModule(Block &block,
        opIterator != e;) {
     auto &op = *opIterator++;
 
-    // Before any splitting, hoisting, etc., decide if this expression should go
-    // into its own wire. This should be updated if ops are replaced.
-    if (shouldSpillWire(op, options))
-      opsToSpill.insert(&op);
-
-    // Lower variadic fully-associative operations with more than two operands
-    // into balanced operand trees so we can split long lines across multiple
-    // statements.
-    // TODO: This is checking the Commutative property, which doesn't seem
-    // right in general.  MLIR doesn't have a "fully associative" property.
-    if (op.getNumOperands() > 2 && op.getNumResults() == 1 &&
-        op.hasTrait<mlir::OpTrait::IsCommutative>() &&
-        mlir::MemoryEffectOpInterface::hasNoEffect(&op) &&
-        op.getNumRegions() == 0 && op.getNumSuccessors() == 0 &&
-        (op.getAttrs().empty() ||
-         (op.getAttrs().size() == 1 && op.hasAttr("sv.namehint")))) {
-      // Lower this operation to a balanced binary tree of the same operation.
-      SmallVector<Operation *> newOps;
-      auto result = lowerFullyAssociativeOp(op, op.getOperands(), newOps);
-      // If this operation is in opsToSpill, update opsToSpill with the new
-      // expression root.
-      if (opsToSpill.count(&op)) {
-        opsToSpill.erase(&op);
-        opsToSpill.insert(result.getDefiningOp());
-      }
-      op.getResult(0).replaceAllUsesWith(result);
-      op.erase();
-
-      // Make sure we revisit the newly inserted operations.
-      opIterator = Block::iterator(newOps.front());
-      continue;
-    }
-
     // Turn a + -cst  ==> a - cst
     if (auto addOp = dyn_cast<comb::AddOp>(op)) {
       if (auto cst = addOp.getOperand(1).getDefiningOp<hw::ConstantOp>()) {
@@ -523,6 +489,34 @@ void ExportVerilog::prepareHWModule(Block &block,
       lowerAlwaysInlineOperation(&op);
       continue;
     }
+
+    // NEW
+    if (op.getNumOperands() > options.maximumNumberOfTermsPerExpression &&
+        op.getNumResults() == 1)
+      lowerUsersToTemporaryWire(
+          op, op.getParentOfType<HWModuleOp>().getBodyBlock());
+
+    // Lower variadic fully-associative operations with more than two operands
+    // into balanced operand trees so we can split long lines across multiple
+    // statements.
+    // TODO: This is checking the Commutative property, which doesn't seem
+    // right in general.  MLIR doesn't have a "fully associative" property.
+    if (op.getNumOperands() > 2 && op.getNumResults() == 1 &&
+        op.hasTrait<mlir::OpTrait::IsCommutative>() &&
+        mlir::MemoryEffectOpInterface::hasNoEffect(&op) &&
+        op.getNumRegions() == 0 && op.getNumSuccessors() == 0 &&
+        (op.getAttrs().empty() ||
+         (op.getAttrs().size() == 1 && op.hasAttr("sv.namehint")))) {
+      // Lower this operation to a balanced binary tree of the same operation.
+      SmallVector<Operation *> newOps;
+      auto result = lowerFullyAssociativeOp(op, op.getOperands(), newOps);
+      op.getResult(0).replaceAllUsesWith(result);
+      op.erase();
+
+      // Make sure we revisit the newly inserted operations.
+      opIterator = Block::iterator(newOps.front());
+      continue;
+    }
   }
 
   // Now that all the basic ops are settled, check for any use-before def issues
@@ -571,7 +565,7 @@ void ExportVerilog::prepareHWModule(Block &block,
       }
 
       // Otherwise, we need to lower this to a wire to resolve this.
-      lowerUsersToTemporaryWire(op);
+      lowerUsersToTemporaryWire(op, op.getBlock());
     }
   }
 }
