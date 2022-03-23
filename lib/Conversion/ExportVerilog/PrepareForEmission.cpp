@@ -475,10 +475,6 @@ void ExportVerilog::prepareHWModule(Block &block,
       // non-inlinable expressions) in the outer scope. See
       // https://github.com/llvm/circt/pull/2773 for an example of this.
       if (hoistNonSideEffectExpr(&op)) {
-        // If this operation is deemed worth spilling into a wire, we need to do
-        // it here, when hoisting out of a place we can't have local variables.
-        if (opsToSpill.count(&op))
-          lowerUsersToTemporaryWire(op);
         continue;
       }
     }
