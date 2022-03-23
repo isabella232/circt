@@ -46,13 +46,12 @@ bool ExportVerilog::isSimpleReadOrPort(Value v) {
   return isa<WireOp, RegOp>(readSrc);
 }
 
-// Check if the value is deemed worth spilling into a wire.
+// Check if the value is deemed worth spilling into a wire. This just considers
+// the number of terms in any single expression, but it could walk up the whole
+// expression tree.
 static bool shouldSpillWire(Operation &op, const LoweringOptions &options) {
   return op.getNumOperands() > options.maximumNumberOfTermsPerExpression &&
-         op.getNumResults() == 1 &&
-         std::distance(op.getResult(0).user_begin(),
-                       op.getResult(0).user_end()) == 1 &&
-         !isa<AssignOp>(*op.getResult(0).getUsers().begin());
+         op.getNumResults() == 1;
 }
 
 // Given an invisible instance, make sure all inputs are driven from
@@ -461,11 +460,9 @@ void ExportVerilog::prepareHWModule(Block &block,
       // conditions, $fwrite statements, and instance inputs.  We could be
       // smarter in ExportVerilog itself, but we'd have to teach it to put
       // spilled expressions (due to line length, multiple-uses, and
-      // non-inlinable expressions) in the outer scope. See
-      // https://github.com/llvm/circt/pull/2773 for an example of this.
-      if (hoistNonSideEffectExpr(&op)) {
+      // non-inlinable expressions) in the outer scope.
+      if (hoistNonSideEffectExpr(&op))
         continue;
-      }
     }
 
     // Duplicate "always inline" expression for each of their users and move
@@ -475,11 +472,16 @@ void ExportVerilog::prepareHWModule(Block &block,
       continue;
     }
 
-    // NEW
-    if (op.getNumOperands() > options.maximumNumberOfTermsPerExpression &&
-        op.getNumResults() == 1) {
+    // If the expression is deemed worthy of spilling into a wire, do so now.
+    if (isVerilogExpression(&op) && shouldSpillWire(op, options)) {
+      // If we're in a procedural region, first hoist the expression out, since
+      // we can't have wires there. This could potentially use an "automatic
+      // logic" type construct, if it exists in the SV dialect, and not hoist
+      // all the way out.
       if (isProceduralRegion)
         hoistNonSideEffectExpr(&op);
+
+      // Create the actual wire, and update users.
       lowerUsersToTemporaryWire(op);
     }
 
