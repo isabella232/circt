@@ -478,10 +478,8 @@ void ExportVerilog::prepareHWModule(Block &block,
     // NEW
     if (op.getNumOperands() > options.maximumNumberOfTermsPerExpression &&
         op.getNumResults() == 1) {
-      if (isProceduralRegion) {
+      if (isProceduralRegion)
         hoistNonSideEffectExpr(&op);
-        continue;
-      }
       lowerUsersToTemporaryWire(op);
     }
 
