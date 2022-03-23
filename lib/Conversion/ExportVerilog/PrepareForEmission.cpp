@@ -392,18 +392,6 @@ void ExportVerilog::prepareHWModule(Block &block,
        opIterator != e;) {
     auto &op = *opIterator++;
 
-    // Turn a + -cst  ==> a - cst
-    if (auto addOp = dyn_cast<comb::AddOp>(op)) {
-      if (auto cst = addOp.getOperand(1).getDefiningOp<hw::ConstantOp>()) {
-        assert(addOp.getNumOperands() == 2 && "commutative lowering is done");
-        if (cst.getValue().isNegative()) {
-          Operation *firstOp = rewriteAddWithNegativeConstant(addOp, cst);
-          opIterator = Block::iterator(firstOp);
-          continue;
-        }
-      }
-    }
-
     // Name legalization should have happened in a different pass for these sv
     // elements and we don't want to change their name through re-legalization
     // (e.g. letting a temporary take the name of an unvisited wire). Adding
@@ -488,9 +476,16 @@ void ExportVerilog::prepareHWModule(Block &block,
 
     // NEW
     if (op.getNumOperands() > options.maximumNumberOfTermsPerExpression &&
-        op.getNumResults() == 1)
-      lowerUsersToTemporaryWire(
-          op, op.getParentOfType<HWModuleOp>().getBodyBlock());
+        op.getNumResults() == 1) {
+      if (!isProceduralRegion ||
+          (isProceduralRegion && hoistNonSideEffectExpr(&op)))
+        lowerUsersToTemporaryWire(
+            op, op.getParentOfType<HWModuleOp>().getBodyBlock());
+      if (isProceduralRegion) {
+        ++opIterator;
+        continue;
+      }
+    }
 
     // Lower variadic fully-associative operations with more than two operands
     // into balanced operand trees so we can split long lines across multiple
@@ -512,6 +507,18 @@ void ExportVerilog::prepareHWModule(Block &block,
       // Make sure we revisit the newly inserted operations.
       opIterator = Block::iterator(newOps.front());
       continue;
+    }
+
+    // Turn a + -cst  ==> a - cst
+    if (auto addOp = dyn_cast<comb::AddOp>(op)) {
+      if (auto cst = addOp.getOperand(1).getDefiningOp<hw::ConstantOp>()) {
+        assert(addOp.getNumOperands() == 2 && "commutative lowering is done");
+        if (cst.getValue().isNegative()) {
+          Operation *firstOp = rewriteAddWithNegativeConstant(addOp, cst);
+          opIterator = Block::iterator(firstOp);
+          continue;
+        }
+      }
     }
   }
 
