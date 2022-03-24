@@ -6,15 +6,17 @@ hw.module @large_use_in_procedural(%a: i1) {
   // CHECK: assign _GEN = a + a + a + a + a;
   // CHECK: always
   sv.always {
-    %1 = comb.add %a, %a, %a, %a, %a : i1
-    // CHECK: if (_GEN
-    sv.if %1 {
-      sv.exit
-    }
-    %2 = comb.add %a, %a, %a, %a : i1
-    // CHECK: if (a + a + a + a)
-    sv.if %2 {
-      sv.exit
+    sv.ifdef.procedural "FOO" {
+      %1 = comb.add %a, %a, %a, %a, %a : i1
+      // CHECK: if (_GEN)
+      sv.if %1 {
+        sv.exit
+      }
+      %2 = comb.add %a, %a, %a, %a : i1
+      // CHECK: if (a + a + a + a)
+      sv.if %2 {
+        sv.exit
+      }
     }
   }
 }
