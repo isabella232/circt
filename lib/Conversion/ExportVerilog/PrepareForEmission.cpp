@@ -387,10 +387,6 @@ void ExportVerilog::prepareHWModule(Block &block,
   // True if these operations are in a procedural region.
   bool isProceduralRegion = block.getParentOp()->hasTrait<ProceduralRegion>();
 
-  // Maintain a set of expressions that have been deemed worth spilling into
-  // their own wire.
-  llvm::SmallPtrSet<Operation *, 8> opsToSpill;
-
   for (Block::iterator opIterator = block.begin(), e = block.end();
        opIterator != e;) {
     auto &op = *opIterator++;
@@ -463,11 +459,9 @@ void ExportVerilog::prepareHWModule(Block &block,
       // conditions, $fwrite statements, and instance inputs.  We could be
       // smarter in ExportVerilog itself, but we'd have to teach it to put
       // spilled expressions (due to line length, multiple-uses, and
-      // non-inlinable expressions) in the outer scope. See
-      // https://github.com/llvm/circt/pull/2773 for an example of this.
-      if (hoistNonSideEffectExpr(&op)) {
+      // non-inlinable expressions) in the outer scope.
+      if (hoistNonSideEffectExpr(&op))
         continue;
-      }
     }
 
     // Duplicate "always inline" expression for each of their users and move
@@ -477,12 +471,19 @@ void ExportVerilog::prepareHWModule(Block &block,
       continue;
     }
 
-    // NEW
+    // If this expression is deemed worth spilling into a wire, do it here.
     if (shouldSpillWire(op, options)) {
+      // If we're not in a procedural region, or we are, but we can hoist out of
+      // it, we are good to generate a wire.
       if (!isProceduralRegion ||
           (isProceduralRegion && hoistNonSideEffectExpr(&op)))
         lowerUsersToTemporaryWire(
             op, op.getParentOfType<HWModuleOp>().getBodyBlock());
+
+      // If we're in a procedural region, we move on to the next op in the
+      // block. The expression splitting and canonicalization below will happen
+      // after we recurse back up. If we're not in a procedural region, the
+      // expression can continue being worked on.
       if (isProceduralRegion) {
         ++opIterator;
         continue;
