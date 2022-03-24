@@ -48,11 +48,14 @@ bool ExportVerilog::isSimpleReadOrPort(Value v) {
 
 // Check if the value is deemed worth spilling into a wire.
 static bool shouldSpillWire(Operation &op, const LoweringOptions &options) {
-  return op.getNumOperands() > options.maximumNumberOfTermsPerExpression &&
+  auto isAssign = [](Operation *op) { return isa<AssignOp>(op); };
+
+  // If there are more than the maximum number of terms in this single result
+  // expression, and it hasn't already been spilled, this should spill.
+  return isVerilogExpression(&op) &&
+         op.getNumOperands() > options.maximumNumberOfTermsPerExpression &&
          op.getNumResults() == 1 &&
-         std::distance(op.getResult(0).user_begin(),
-                       op.getResult(0).user_end()) == 1 &&
-         !isa<AssignOp>(*op.getResult(0).getUsers().begin());
+         llvm::none_of(op.getResult(0).getUsers(), isAssign);
 }
 
 // Given an invisible instance, make sure all inputs are driven from
@@ -475,8 +478,7 @@ void ExportVerilog::prepareHWModule(Block &block,
     }
 
     // NEW
-    if (op.getNumOperands() > options.maximumNumberOfTermsPerExpression &&
-        op.getNumResults() == 1) {
+    if (shouldSpillWire(op, options)) {
       if (!isProceduralRegion ||
           (isProceduralRegion && hoistNonSideEffectExpr(&op)))
         lowerUsersToTemporaryWire(
